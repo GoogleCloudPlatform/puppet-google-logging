@@ -1,0 +1,24 @@
+---
+name: license
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+jobs:
+  license:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.16'
+
+      - name: Install addlicense
+        run: go install github.com/google/addlicense@latest
+
+      - name: Check license headers
+        run: "./.github/scripts/check_license.sh"

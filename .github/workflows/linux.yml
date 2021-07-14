@@ -1,0 +1,152 @@
+---
+name: linux
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/linux.yml"
+      - ".github/scripts/**"
+      - "manifests/**"
+      - "test/cases/linux/**"
+      - "test/terraform/**"
+      - "Puppetfile"
+      - "metadata.json"
+  push:
+    paths:
+      - ".github/workflows/linux.yml"
+      - ".github/scripts/**"
+      - "manifests/**"
+      - "test/cases/linux/**"
+      - "test/terraform/**"
+      - "Puppetfile"
+      - "metadata.json"
+    branches:
+      - master
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+    env:
+      TF_VERSION: "1.0.0"
+      ZONE: "us-east1-b"
+    strategy:
+      fail-fast: false
+      matrix:
+        agent_type:
+          - ops-agent
+          - logging
+          - monitoring
+        version:
+          - "2.0.1"
+          - latest
+        # distro is the key for determining instance name and gce image
+        distro:
+          - ubuntu-2004
+          - ubuntu-1804
+          - ubuntu-1604
+          - debian-10
+          - debian-9
+          - centos-s8
+          - centos-8
+          - centos-7
+          - rhel-8
+          - rhel-7
+          - suse-15
+          - suse-12
+        exclude:
+          # invalid combos
+          - agent_type: logging
+            version: "2.0.1"
+          - agent_type: monitoring
+            version: "2.0.1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Install test utils
+        run: ./.github/scripts/setup.sh
+        env:
+          PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Install Gcloud SDK
+        uses: google-github-actions/setup-gcloud@master
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Deploy instance
+        run: ../../.github/scripts/terraform-apply.sh ${{ matrix.distro }} ${{ matrix.agent_type }} ${{ matrix.version }}
+        working-directory: ./test/terraform
+        timeout-minutes: 10
+
+      - name: Configure SSH
+        run: |
+          INSTANCE=$(echo ${{ matrix.distro }}-${{ matrix.agent_type }}-${{ matrix.version }}-$(git rev-parse --short HEAD) | tr -d '.')
+          ./.github/scripts/ssh.sh $INSTANCE
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+        timeout-minutes: 10
+
+      - name: Test Install
+        run: |
+          INSTANCE=$(echo ${{ matrix.distro }}-${{ matrix.agent_type }}-${{ matrix.version }}-$(git rev-parse --short HEAD) | tr -d '.')
+          export ADDRESS=$(gcloud --project "${PROJECT}" compute instances describe --zone "${ZONE}" "${INSTANCE}" --format=json | jq -r '.networkInterfaces[0].accessConfigs[0].natIP')
+          ./.github/scripts/puppet.sh
+          ./.github/scripts/inspec.sh
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          PLATFORM: linux
+          VERSION: ${{ matrix.version }}
+          AGENT_TYPE: ${{ matrix.agent_type }}
+          ACTION: install
+        timeout-minutes: 10
+
+      - name: Test Upgrade
+        run: |
+          INSTANCE=$(echo ${{ matrix.distro }}-${{ matrix.agent_type }}-${{ matrix.version }}-$(git rev-parse --short HEAD) | tr -d '.')
+          export ADDRESS=$(gcloud --project "${PROJECT}" compute instances describe --zone "${ZONE}" "${INSTANCE}" --format=json | jq -r '.networkInterfaces[0].accessConfigs[0].natIP')
+          ./.github/scripts/puppet.sh
+          ./.github/scripts/inspec.sh
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          PLATFORM: linux
+          VERSION: ${{ matrix.version }}
+          AGENT_TYPE: ${{ matrix.agent_type }}
+          ACTION: upgrade
+        timeout-minutes: 10
+        if: matrix.version != 'latest'
+
+      - name: Test Uninstall
+        run: |
+          INSTANCE=$(echo ${{ matrix.distro }}-${{ matrix.agent_type }}-${{ matrix.version }}-$(git rev-parse --short HEAD) | tr -d '.')
+          export ADDRESS=$(gcloud --project "${PROJECT}" compute instances describe --zone "${ZONE}" "${INSTANCE}" --format=json | jq -r '.networkInterfaces[0].accessConfigs[0].natIP')
+          ./.github/scripts/puppet.sh
+          ./.github/scripts/inspec.sh
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          PLATFORM: linux
+          VERSION: ${{ matrix.version }}
+          AGENT_TYPE: ${{ matrix.agent_type }}
+          ACTION: uninstall
+        timeout-minutes: 10
+
+      - name: Test Install w/ Custom Config
+        run: |
+          INSTANCE=$(echo ${{ matrix.distro }}-${{ matrix.agent_type }}-${{ matrix.version }}-$(git rev-parse --short HEAD) | tr -d '.')
+          export ADDRESS=$(gcloud --project "${PROJECT}" compute instances describe --zone "${ZONE}" "${INSTANCE}" --format=json | jq -r '.networkInterfaces[0].accessConfigs[0].natIP')
+          ./.github/scripts/puppet.sh
+          ./.github/scripts/inspec.sh
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          PLATFORM: linux
+          VERSION: ${{ matrix.version }}
+          AGENT_TYPE: ${{ matrix.agent_type }}
+          ACTION: custom_config
+        timeout-minutes: 10
+
+      - name: Tear down instance
+        run: ../../.github/scripts/terraform-destroy.sh ${{ matrix.distro }} ${{ matrix.agent_type }} ${{ matrix.version }}
+        working-directory: ./test/terraform
+        timeout-minutes: 20
+        if: ${{ always() }}

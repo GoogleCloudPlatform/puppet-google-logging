@@ -1,68 +1,155 @@
-# Google Stackdriver Logging Puppet Module
+# Google Cloud Operations Agents Puppet Integration
 
-## Overview
+[![Status](https://github.com/BlueMedora/google-puppet-agents/workflows/linux/badge.svg)](https://github.com/BlueMedora/google-puppet-agents/linux)
+[![Status](https://github.com/BlueMedora/google-puppet-agents/workflows/windows/badge.svg)](https://github.com/BlueMedora/google-puppet-agents/windows)
+[![Status](https://github.com/BlueMedora/google-puppet-agents/workflows/shellcheck/badge.svg)](https://github.com/BlueMedora/google-puppet-agents/shellcheck)
 
-This module will install the Google Stackdriver Logging Agent. This application
-is required for using Stackdriver Monitoring with a VM.
+## Description
 
-The Monitoring agent is a collectd-based daemon that gathers system and
-application metrics from virtual machine instances and sends them to
-Stackdriver Monitoring. By default, the Monitoring agent collects disk, CPU,
-network, and process metrics.
+Puppet module for [Google Cloud Operations agents](https://cloud.google.com/stackdriver/docs/solutions/agents).
 
-## Setup
+## Support Matrix
 
-To install this module on your Puppet Master (or Puppet Client/Agent), use the
-Puppet module installer:
+- Linux
+  - [Ops Agent](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent)
+    - [Supported operating systems](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent#supported_operating_systems)
+  - [Monitoring Agent](https://cloud.google.com/stackdriver/docs/solutions/agents/monitoring)
+    - [Supported Operating Systems](https://cloud.google.com/stackdriver/docs/solutions/agents/monitoring#supported_operating_systems)
+  - [Logging Agent](https://cloud.google.com/stackdriver/docs/solutions/agents/logging)
+    - [Supported Operating Systems](https://cloud.google.com/stackdriver/docs/solutions/agents/logging#supported_operating_systems)
+- Windows
+  - [Cloud Ops Agent](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent)
+    - [Supported Operating Systems](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent#supported_operating_systems)
 
-    puppet module install google-glogging
+## Requirements
 
-Optionally you can install support to _all_ Google Cloud Platform products at
-once by installing our "bundle" [`google-cloud`][bundle-forge] module:
+https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent#access
 
-    puppet module install google-cloud
+## Prerequisite Modules
+
+The following modules must be available on the Puppet server:
+- [lwf-remote_file](https://forge.puppet.com/modules/lwf/remote_file)
+
+## Install Module
+
+### Install Module from Source
+To build the module from source:
+- Build: `pdk build`
+- Copy to your Puppet server
+  - The built module can be found in `pkg/`
+- Install: `puppet module install ops-cloud_ops-0.1.0.tar.gz`
+- Verify: `puppet module list`
 
 ## Usage
 
-To install the [Google Stackdriver Logging Agent][logging-agent], add the
-following class to your Puppet manifest.
+| Parameter               | Default       | Description                                                       |
+| ---                     | ---           | ---                                                               |
+| `agent_type`            | Required      | The agent type: `ops-agent`, `monitoring`, `logging`              |
+| `package_state`         | `present`     | Whether the agent should be installed or not (`present` | `absent`) |
+| `version`               | `latest`      | The version variable can be used to specify which version of the agent to install. The allowed values are latest, MAJOR_VERSION.*.* and MAJOR_VERSION.MINOR_VERSION.PATCH_VERSION, which are described in detail below. |
+| `main_config`           |               | Optional value for overriding the default configuration. For configuration syntax instructions, see [Ops Agent Config](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent/configuration), [Logging Agent Config](https://cloud.google.com/logging/docs/agent/logging/configuration), and [Monitoring Agent](https://cloud.google.com/monitoring/agent/monitoring/configuration for configuration) for more details.           |
+| `additional_config_dir` |               | Optional value for overriding the plugins directory for the `monitoring` or `logging` agents |
 
-```puppet
-include glogging::agent
-```
+### Version
 
-## Permissions Required
+- version=`latest`
+  - This setting makes it easier to keep the agent version up to date, however it does come with a potential risk. When a new major version is released, the policy may install the latest version of the agent from the new major release, which may introduce breaking changes. For production environments, consider using the version=MAJOR_VERSION.*.* setting below for safer agent deployments.
 
-Each GCP machine requires the `https://www.googleapis.com/auth/logging.write`
-scope in order to write logs.
+- version=`MAJOR_VERSION.*.*`
+  - When a new major release is out, this setting ensures that only the latest version from the specified major version is installed, which avoids accidentally introducing breaking changes. This is recommended for production environments to ensure safer agent deployments.
 
-Using the [gcompute_instance][] resource, you can add the following:
+- version=`MAJOR_VERSION.MINOR_VERSION.PATCH_VERSION`
+  - This setting is not recommended since it prevents upgrades of new versions of the agent that include bug fixes and other improvements.
 
-```puppet
-gcompute_instance { 'my-vm':
-  ...
-  service_accounts   => {
-    ...
-    scopes => [
-        ...
-        # Enable Stackdriver Logging API access
-        'https://www.googleapis.com/auth/logging.write',
-        ...
-    ],
-  }
+### Example:
+
+An example implementation can be found in [example/manifests/ops_agent.pp](example/manifests/ops_agent.pp)
+
+#### Ops Agent
+
+Install the latest version:
+```ruby
+google_cloud_ops::agent {'ops-agent':
+  agent_type  => 'ops-agent',
 }
 ```
 
-For more information on how to use the `gcompute_instance` please visit the
-[google-gcompute][] module documentation.
+#### Ops Agent with Custom Configuration
 
+This example assumes:
+- The module's name is `example`
+- The module `example` has a file at `files/ops_agent/config.yaml` that represents the custom configuration
 
-## Viewing Logs
+Install version 1.0.5 and use a custom configuration:
+```ruby
+google_cloud_ops::agent {'ops-agent':
+  agent_type  => 'ops-agent',
+  installed   => true,
+  version     => '1.0.5',
+  main_config => 'puppet:///modules/example/ops_agent/config.yaml',
+}
+```
 
-Please go to the [Google Cloud console][logs] to view the Stackdriver logs.
+#### Remove Ops Agent
 
+Ensure the agent is not installed by setting `installed` to false:
+```ruby
+google_cloud_ops::agent {'ops-agent':
+  agent_type  => 'ops-agent',
+  installed   => false,
+  version     => 'latest',
+}
+```
 
-[logging-agent]: https://cloud.google.com/logging/docs/agent/
-[google-gcompute]: https://github.com/GoogleCloudPlatform/puppet-google-compute
-[gcompute_instance]: https://github.com/GoogleCloudPlatform/puppet-google-compute#gcompute_instance
-[logs]: https://console.cloud.google.com/logs
+#### Install Monitoring Agent
+
+- Install latest release of major version 6
+- Use custom configuration
+- Use custom plugins
+
+```ruby
+google_cloud_ops::agent {'monitoring-agent':
+  agent_type            => 'monitoring',
+  installed             => true,
+  version               => '6.*.*',
+
+  # optional
+  main_config           => 'puppet:///modules/example/monitoring/collectd.conf',
+  additional_config_dir => 'puppet:///modules/example/monitoring/plugins'
+}
+```
+
+#### Install Logging Agent
+
+- Install latest release
+- Use custom configuration
+- Use custom plugins
+
+```ruby
+google_cloud_ops::agent {'logging-agent':
+  agent_type            => 'logging',
+  installed             => true,
+  version               => 'latest',
+
+  # optional
+  main_config           => 'puppet:///modules/example/logging/google-fluentd.conf',
+  additional_config_dir => 'puppet:///modules/example/logging/plugins'
+}
+```
+
+## License
+
+```
+Copyright 2021 Google Inc. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License.  You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations under the License.
+```
